@@ -89,6 +89,8 @@ $values = $response->getValues();
 
 use Sunra\PhpSimple\HtmlDomParser;
 foreach ($values as $key => $value) {
+	usleep(rand(1000000,10000000))
+
 	$dom = HtmlDomParser::file_get_html( $value[0] );
 	// exit();
 	$item = array();
