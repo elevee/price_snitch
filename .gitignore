@@ -6,3 +6,4 @@ rsvp-config.php
 credentials*.json
 token.json
 client_secret*.json
+price_config.php
