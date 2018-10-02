@@ -1,0 +1,8 @@
+/vendor
+composer.phar
+composer.lock
+
+rsvp-config.php
+credentials*.json
+token.json
+client_secret*.json
