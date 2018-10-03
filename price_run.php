@@ -9,6 +9,7 @@ require_once __DIR__ . '/price_config.php';
 // These must be at the top of your script, not inside a function
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
+use Sunra\PhpSimple\HtmlDomParser;
 
 define('APPLICATION_NAME', 'Price Snitch');
 // define('CREDENTIALS_PATH', __DIR__ . '/credentials.json');
@@ -87,53 +88,65 @@ $response = $service->spreadsheets_values->get($spreadsheetId, $range);
 $values = $response->getValues();
 // print_r($values);
 
-use Sunra\PhpSimple\HtmlDomParser;
 foreach ($values as $key => $value) {
-	usleep(rand(1000000,10000000))
+	if(isset($value[0]) && is_string($value[0]) && isset($value[1]) && is_string($value[1])){ //if url and site present
+		$seconds = rand(1000000,10000000);
+		// echo(sprintf("Pausing %d seconds", $seconds/1000000));
+		usleep($seconds);
 
-	$dom = HtmlDomParser::file_get_html( $value[0] );
-	// exit();
+		$item = parse($value[0], $value[1]);
+
+		$price_beat = isset($value[3]) && strlen($value[3]) > 0 && floatval($value[3]) > floatval($item["price"]);
+		if($price_beat){ 
+			//email a sista
+			echo("aw snap, price beat!\n");
+			$email_response = $service->spreadsheets_values->get($spreadsheetId, "Config!B1");
+			$e = $email_response->getValues();
+			sendEmail($item, $e[0][0]);
+		}
+		//if last checked price is greater than current price, send email and update price
+
+		$r = $key+2; //true row number (accounting for header row)
+		$writeRange = "Products!C".$r.":E".$r;
+		// echo("What's the write range?  ". $writeRange);
+		
+		
+		$vals = null;
+		$vals = [[
+			isset($value[2]) && strlen($value[2]) > 0 ? Google_Model::NULL_VALUE : $item["name"], //if no name, populate
+			$item["price"],
+			date('Y-m-d H:i:s')
+		]];
+		$body = new Google_Service_Sheets_ValueRange([
+		  'values' => $vals
+		]);
+		$params = [
+		  'valueInputOption' => "USER_ENTERED"
+		];
+		try {
+			$result = $service->spreadsheets_values->update($spreadsheetId, $writeRange, $body, $params);	
+		} catch (Exception $e) {
+			echo 'Values not updated. Error: ', $e;
+		}
+	}
+}
+
+function parse($url, $site){
 	$item = array();
-	foreach ($dom->find("#product-content") as $product) {
-		// print_r($product);
-		$item["url"]   = $value[0];
-		$item["name"]  = trim($product->find(".product-name", 0)->plaintext);
-		$item["price"] = str_replace("$", "", trim($product->find(".price-sales", 0)->plaintext));
-	}
-	print_r($item);
-
-	$price_beat = isset($value[3]) && strlen($value[3]) > 0 && floatval($value[3]) > floatval($item["price"]);
-	if($price_beat){ 
-		//email a sista
-		echo("aw snap, price beat!\n");
-		$email_response = $service->spreadsheets_values->get($spreadsheetId, "Config!B1");
-		$e = $email_response->getValues();
-		sendEmail($item, $e[0][0]);
-	}
-	//if last checked price is greater than current price, send email and update price
-
-	$r = $key+2; //true row number (accounting for header row)
-	$writeRange = "Products!C".$r.":E".$r;
-	// echo("What's the write range?  ". $writeRange);
+	$dom = HtmlDomParser::file_get_html($url);
 	
-	
-	$vals = null;
-	$vals = [[
-		isset($value[2]) && strlen($value[2]) > 0 ? Google_Model::NULL_VALUE : $item["name"], //if no name, populate
-		$item["price"],
-		date('Y-m-d H:i:s')
-	]];
-	$body = new Google_Service_Sheets_ValueRange([
-	  'values' => $vals
-	]);
-	$params = [
-	  'valueInputOption' => "USER_ENTERED"
-	];
-	try {
-		$result = $service->spreadsheets_values->update($spreadsheetId, $writeRange, $body, $params);	
-	} catch (Exception $e) {
-		echo 'Values not updated. Error: ', $e;
+	switch($site){
+		case "katespade":
+			foreach ($dom->find("#product-content") as $product) {
+				// print_r($product);
+				$item["url"]   = $url;
+				$item["name"]  = trim($product->find(".product-name", 0)->plaintext);
+				$item["price"] = str_replace("$", "", trim($product->find(".price-sales", 0)->plaintext));
+			}
+			print_r($item);
+			break;
 	}
+	return $item;
 }
 
 function sendEmail($item, $sendTo){
