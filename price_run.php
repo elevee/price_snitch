@@ -86,20 +86,25 @@ $spreadsheetId = $SPREADSHEET_ID["production"];
 $range = 'A2:H';
 $response = $service->spreadsheets_values->get($spreadsheetId, $range);
 $values = $response->getValues();
-// print_r($values);
+print_r($values);
 
 function addPriceToHistory($oldPrice, $newPrice){
 	return $oldPrice .= trim($oldPrice) === "" ? $newPrice : (", ".$newPrice);
 }
 
 foreach ($values as $key => $value) {
-	// if($value[1] === "katespade") continue;
-	if(isset($value[0]) && is_string($value[0]) && isset($value[1]) && is_string($value[1])){ //if url and site present
+	$url  = $value[0];
+	$site = isset($value[1]) ? $value[1] : null;
+	if(!$site){
+		$url_contents = parse_url($url);
+		$site = explode('.', $url_contents['host'])[1];
+	}
+	if(isset($url) && is_string($url) && isset($site) && is_string($site)){ //if url and site present
 		$seconds = rand(1000000,10000000);
 		// echo(sprintf("Pausing %d seconds", $seconds/1000000));
 		usleep($seconds);
 
-		$item 				= parse($value[0], $value[1]);
+		$item 				= parse($url, $site);
 		$price_history 		= isset($value[4]) ? $value[4] : null;
 		$sold_out			= false;
 		$previously_avail 	= isset($value[6]) ? trim($value[6]) === "Yep" : false;
@@ -111,7 +116,7 @@ foreach ($values as $key => $value) {
 		$email_nec			= false;
 		$email_reason   	= null;
 		$r 					= $key+2; //true row number (accounting for header row)
-		$writeRange 		= "Products!C".$r.":I".$r;
+		$writeRange 		= "Products!B".$r.":I".$r;
 
 
 		if($not_avail && $previously_avail){ //if this is the first time this item is not available
@@ -131,6 +136,7 @@ foreach ($values as $key => $value) {
 		}
 
 		if($email_nec){
+			echo("Email will be sent.\n");
 			$email_fetch = $service->spreadsheets_values->get($spreadsheetId, "Config!B1");
 			$e = $email_fetch->getValues();
 			sendEmail($item, $e[0][0], $email_reason);
@@ -140,7 +146,8 @@ foreach ($values as $key => $value) {
 		//Updating the spreadsheet
 		$vals = null;
 		$vals = [[
-			isset($value[2]) && strlen($value[2]) > 0 ? Google_Model::NULL_VALUE : $item["name"], //if no name, populate
+			isset($site) && strlen($site) > 0 ? $site : 'Not detected from URL',
+			isset($value[2]) && strlen($value[2]) > 0 ? Google_Model::NULL_VALUE : (isset($item["name"]) ? $item["name"] : "Unidentified item. Check URL."), //if no name, populate
 			isset($item["price"]) ? $item["price"] : "N/A",
 			isset($price_history) ? $price_history : "",
 			$sold_out ? "Yep" : "Nope",
@@ -165,10 +172,13 @@ foreach ($values as $key => $value) {
 
 function parse($url, $site){
 	$item = array();
-	
+	$user_agents = array(
+		'coach' 	=> "Mozilla/5.0 (X11; CrOS x86_64 8172.45.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.64 Safari/537.36\r\n",
+		'katespade' => "User-Agent:Mozilla/5.0 (iPhone; CPU iPhone OS 7_0 like Mac OS X; en-us) AppleWebKit/537.51.1 (KHTML, like Gecko) Version/7.0 Mobile/11A465 Safari/9537.53\r\n"
+	);
 	$opts = array(
 	  'http'=>array(
-	    'header'=>"User-Agent:Mozilla/5.0 (iPhone; CPU iPhone OS 7_0 like Mac OS X; en-us) AppleWebKit/537.51.1 (KHTML, like Gecko) Version/7.0 Mobile/11A465 Safari/9537.53\r\n"
+	    'header'=> $user_agents[$site]
 	  )
 	);
 	 
@@ -186,11 +196,18 @@ function parse($url, $site){
 			print_r($item);
 			break;
 		case "coach":
-			// foreach ($dom->find("#product-content") as $product) {
-				// print_r($product);
-			$item["name"]  = trim($dom->find(".product-name-desc", 0)->plaintext);
-			$item["price"] = str_replace("$", "", trim($dom->find(".price", 0)->plaintext));
-			// }
+			foreach ($dom->find(".title-area") as $product) {
+				$sale_price = $product->find('span.sales', 0);
+				$list_price = $product->find('span.list', 0);
+				if(count($sale_price) > 0){
+					$item["price"] = trim($sale_price->plaintext);
+				} else{
+					$item["price"] = trim($list_price->plaintext);
+				}
+				// echo($item["price"]);
+				$item["name"]  = trim($product->find(".product-name-desc", 0)->plaintext);
+				$item["price"] = str_replace("$", "", trim($item["price"]));
+			}
 			print_r($item);
 			break;
 	}
